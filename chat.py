@@ -1,4 +1,3 @@
-# import the array from data.json
 import json
 import random
 import re
