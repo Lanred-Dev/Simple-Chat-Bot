@@ -38,5 +38,25 @@
     {
         "input": "How are you?",
         "response": "Im doing well! You?"
+    },
+    {
+        "input": "%name% is my name",
+        "response": "Hello %name% nice to meet you!"
+    },
+    {
+        "input": "My name is %name%",
+        "response": "Nice to meet you %name%!"
+    },
+    {
+        "input": "I like %LISTlike%.",
+        "response": "Nice to hear that you like %LISTlike%!"
+    },
+    {
+        "input": "What do i like?",
+        "response": "You like %LISTlike%."
+    },
+    {
+        "input": "Your name is %bot%",
+        "response": "Ok my new name is %bot%!"
     }
 ]
