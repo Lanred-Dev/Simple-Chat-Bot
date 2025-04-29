@@ -49,7 +49,7 @@
     },
     {
         "input": "I like %LISTlike%.",
-        "response": "Nice to hear that you like %LISTlike%!"
+        "response": "Nice to hear that you like %RESPONSELISTlike%!"
     },
     {
         "input": "What do i like?",

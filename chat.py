@@ -3,110 +3,155 @@ import random
 import re
 
 LIST_KEY = "LIST"
+RESPONSE_LIST_KEY = "RESPONSELIST"
+MINIMUM_SCORE = 0.3
+COULD_NOT_UNDERSTAND = "Im sorry, I could not understand that. Could you please rephrase?"
+EXACT_MATCH_WEIGHT = 2
+MATCH_WEIGHT = 1
 
 conversationMeta = {}
 
 with open('data.json') as file:
-    data = json.load(file)
+    sampleConversations = json.load(file)
 
+# Replaces all the special tokens in the response with the values from conversationMeta
 def parseResponse(response):
-    for key, value in conversationMeta.items():
-        if str(key) in response:
-            if LIST_KEY in key:
-                if len(value) > 1:
-                    value = ", ".join(value[:-1]) + " and " + value[-1]
-                elif len(value) == 1:
-                    value = value[0]
-            
-            response = response.replace(f'%{key}%', value)
+    for key in response.split():
+        # This prevents punctuation from being included in the key
+        key = re.sub(r'[^a-zA-Z0-9%]+', "", key)
+        
+        if key[0] != '%' or key[-1] != '%': continue
+
+        actualKey = key[1:-1].replace(RESPONSE_LIST_KEY, "").replace(LIST_KEY, "")
+        value = conversationMeta.get(actualKey, None)
+
+        if value is None: continue
+
+        if RESPONSE_LIST_KEY in key:
+            # The first index is the most recent response, so we only use that one
+            value = value[-1]
+        elif LIST_KEY in key:
+            if len(value) > 1:
+                value = ", ".join(value[:-1]) + " and " + value[-1]
+            elif len(value) == 1:
+                value = value[0]
+
+        response = response.replace(key, value)
 
     return response
 
-def determineResponse(input):
-    tokens = input.lower().split()
-    bestScore = 0
-    bestResponse = None
-    responses = []
+def determineResponse(userInput):
+    userInput = userInput.lower()
+    inputTokens = list(userInput)
     tempConversationMeta = {}
 
-    for responseIndex, sampleResponse in enumerate(data):
-        sampleInput = sampleResponse['input'].lower().replace(r'%[a-zA-Z]+%', '')
-        score = 0
-        sampleTokens = sampleInput.split()
+    bestScore = 0
+    bestResponses = []
 
-        # First match by tokens. This matches every character, +2 if its an exact match and +1 for it being in the input
-        for index, token in enumerate(tokens):
-            if index >= len(sampleTokens):
-                break
+    for responseIndex, potentialResponse in enumerate(sampleConversations):
+        sampleInput = potentialResponse['input'].lower().replace(r'%[a-zA-Z]+%', '')
+        inputScore = 0
 
-            if token == sampleTokens[index]:
-                score += 1
+        # If its an exact match, we can skip the rest of the checks
+        if userInput == sampleInput:
+            bestScore = inputScore
+        else:
+            # If not an exact match then match by words and characters. +2 if its an exact match and +1 for it being in the sampleInput
+            for index, character in enumerate(inputTokens):
+                if index >= len(sampleInput): break
 
-            if token in sampleInput:
-                score += 1
+                if character == sampleInput[index]:
+                    inputScore += 1 * EXACT_MATCH_WEIGHT
 
-        specialPositions = {}
+                if character in sampleInput:
+                    inputScore += 1 * MATCH_WEIGHT
+
+            for index, word in enumerate(userInput.split()):
+                if index >= len(sampleInput): break
+
+                if word == sampleInput[index]:
+                    inputScore += 0.5 * EXACT_MATCH_WEIGHT
+
+                if word in sampleInput:
+                    inputScore += 0.5 * MATCH_WEIGHT
+
+        # Filter out responses that do not meet the minimum score threshold
+        maxCharacterScore = len(sampleInput) * (EXACT_MATCH_WEIGHT + MATCH_WEIGHT)
+        maxWordScore = len(sampleInput.split()) * (0.5 * EXACT_MATCH_WEIGHT + 0.5 * MATCH_WEIGHT)
+
+        if inputScore / (maxCharacterScore + maxWordScore) < MINIMUM_SCORE: continue
+
+        specialTokens = {}
 
         # Find all the special tokens are in the sample
-        for index, token in enumerate(sampleResponse['input'].split()):
+        for index, token in enumerate(potentialResponse['input'].split()):
             if re.match(r"%[a-zA-Z]+%", token):
-                specialPositions[index] = token
+                specialTokens[index] = token
 
         # Only create a new conversationMeta if there are special tokens in the input
-        if len(specialPositions) > 0: tempConversationMeta[responseIndex] = conversationMeta.copy()
+        if len(specialTokens) > 0: tempConversationMeta[responseIndex] = conversationMeta.copy()
 
         # Loop through all special tokens and check if they are in the input
-        for specialIndex, specialToken in specialPositions.items():
+        for specialIndex, specialToken in specialTokens.items():
             key = re.search(r"%[a-zA-Z]+%", specialToken).group(0)[1:-1]
-            input_tokens = input.lower().split(" ")
-            special = None
+            value = None
 
-            # Check the position first (making sure the index is valid)
-            if specialIndex < len(input_tokens):  # Changed <= to < to avoid index out of range
-                if input_tokens[specialIndex] not in sampleResponse['input'].lower():
-                    special = input_tokens[specialIndex]
+            if specialIndex < len(userInput):
+                if userInput.split()[specialIndex] not in potentialResponse['input'].lower():
+                    value = userInput.split()[specialIndex]
             else:
-                # Then check to find any word thats not in the input
-                for index, token in enumerate(input_tokens):
+                # Find any word thats not in the input
+                for index, token in enumerate(inputTokens):
                     if token in sampleInput: continue
 
-                    special = token
+                    value = token
                     break
 
-            if special is None: continue
+                # If no value is found find the word that repeats the most in the input
+                if value is None:
+                    for index, token in enumerate(inputTokens):
+                        if userInput.count(token) > sampleInput.count(token):
+                            value = token
+                            break
 
-            special = re.sub(r'[^a-zA-Z]+', "", special)
+            if value is None: continue
+
+            value = re.sub(r'[^a-zA-Z]+', "", value)
             
             # If its a list then we need to add the item to the list
-            if LIST_KEY in key:
-                if key not in tempConversationMeta[responseIndex]:
-                    tempConversationMeta[responseIndex][key] = [special]
-                else:
-                    tempConversationMeta[responseIndex][key].append(special)
+            if LIST_KEY in key or RESPONSE_LIST_KEY in key:
+                actualKey = key.replace(RESPONSE_LIST_KEY, "").replace(LIST_KEY, "")
+
+                if actualKey not in tempConversationMeta[responseIndex]:
+                    tempConversationMeta[responseIndex][actualKey] = [value]
+                elif value not in tempConversationMeta[responseIndex][actualKey]:
+                    tempConversationMeta[responseIndex][actualKey].append(value)
             else:
-                tempConversationMeta[responseIndex][key] = special
-                
-        score = score / len(sampleInput)
+                tempConversationMeta[responseIndex][key] = value
 
-        if score >= bestScore:
-            bestScore = score
-            bestResponse = responseIndex
-            responses = [responseIndex]
+        if inputScore == bestScore:
+            bestResponses.append(responseIndex)
+        elif inputScore > bestScore:
+            bestScore = inputScore
+            bestResponses = [responseIndex]
 
-        if score == bestScore:
-            responses.append(responseIndex)
+    if len(bestResponses) == 0: return COULD_NOT_UNDERSTAND
+    
+    bestResponseIndex = None
 
-    if len(responses) > 1:
-        bestResponse = random.choice(responses)
+    if len(bestResponses) == 1:
+        bestResponseIndex = bestResponses[0]
+    elif len(bestResponses) > 1:
+        bestResponseIndex = random.choice(bestResponses)
 
-    if bestResponse in tempConversationMeta:
-        for key, value in tempConversationMeta[bestResponse].items():
+    # Update the conversationMeta with the best response's metadata
+    if bestResponseIndex in tempConversationMeta:
+        for key, value in tempConversationMeta[bestResponseIndex].items():
             conversationMeta[key] = value
 
-    return parseResponse(data[bestResponse]["response"])
+    return parseResponse(sampleConversations[bestResponseIndex]["response"])
 
 
 while True:
-    userInput = input('You: ')
-    response = determineResponse(userInput)
-    print(conversationMeta.get("bot", "Bot") + ':', response)
+    userInput = input(f'{conversationMeta.get("name", "You")}: ')
+    print(f'{conversationMeta.get("bot", "Bot")}: {determineResponse(userInput)}')
