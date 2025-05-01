@@ -1,16 +1,16 @@
 import json
 
 def addTrainingData(input, response):
-    with open('data.json') as file:
-        data = json.load(file)
+    with open('samples.json') as file:
+        samples = json.load(file)
 
-    data.append({
+    samples.append({
         'input': input,
         'response': response
     })
 
-    with open('data.json', 'w') as file:
-        json.dump(data, file, indent=4)
+    with open('samples.json', 'w') as file:
+        json.dump(samples, file, indent=4)
 
 while True:
     userInput = input('Input: ')

@@ -1,0 +1,22 @@
+[
+    {
+        "input": "Hello!",
+        "response": "Hello!"
+    },
+    {
+        "input": "How are you?",
+        "response": "Im doing well! You?"
+    },
+    {
+        "input": "Whats your name?",
+        "response": "My name is %GET-STRING_bot_name%!"
+    },
+    {
+        "input": "My name is %SET-STRING_user_name%.",
+        "response": "Nice to meet you %GET-STRING_user_name%!"
+    },
+    {
+        "input": "I like %ADD-LIST_likes%.",
+        "response": "You like %INDEX-[-1]-LIST_likes%!"
+    }
+]

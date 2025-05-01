@@ -1,0 +1,32 @@
+{
+  "special_keys": {
+    "list": {
+      "key": "LIST_",
+      "prefixes": {
+        "add": "ADD\\-",
+        "remove": "REMOVE\\-",
+        "clear": "CLEAR\\-",
+        "set": "SET\\-",
+        "get": "GET\\-",
+        "index": "INDEX\\-\\[(\\-?\\d+)\\]\\-"
+      }
+    },
+    "string": {
+      "key": "STRING_",
+      "prefixes": {
+        "set": "SET\\-",
+        "get": "GET\\-"
+      }
+    }
+  },
+  "weights": {
+    "phrase_exact": 2,
+    "phrase_partial": 1.5,
+    "word_exact": 1,
+    "word_partial": 0.75,
+    "character_exact": 0.5,
+    "character_partial": 0.25
+  },
+  "could_not_understand": ["Sorry, I didnt understand that."],
+  "minimum_confidence": 0.5
+}
