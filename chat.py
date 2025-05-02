@@ -2,6 +2,7 @@ import re
 import string
 import json
 import random
+import copy
 
 with open('config.json') as file:
     CONFIG = json.load(file)
@@ -26,6 +27,39 @@ SPECIAL_KEYS = CONFIG["special_keys"]
 COULD_NOT_UNDERSTAND_RESPONSES = CONFIG["could_not_understand"]
 
 SPECIAL_KEY_SAFE_PUNCTUATION = "!@#$^&*()+={}|\\:;\"'<>,.?/~`"
+LIST_SEPARATORS = ["and", "or"]
+
+def levenshtein_distance(str1, str2):
+    # Get the lengths of the input strings
+    m = len(str1)
+    n = len(str2)
+ 
+    # Initialize two rows for dynamic programming
+    prev_row = [j for j in range(n + 1)]
+    curr_row = [0] * (n + 1)
+ 
+    # Dynamic programming to fill the matrix
+    for i in range(1, m + 1):
+        # Initialize the first element of the current row
+        curr_row[0] = i
+ 
+        for j in range(1, n + 1):
+            if str1[i - 1] == str2[j - 1]:
+                # Characters match, no operation needed
+                curr_row[j] = prev_row[j - 1]
+            else:
+                # Choose the minimum cost operation
+                curr_row[j] = 1 + min(
+                    curr_row[j - 1],  # Insert
+                    prev_row[j],      # Remove
+                    prev_row[j - 1]    # Replace
+                )
+ 
+        # Update the previous row with the current row
+        prev_row = curr_row.copy()
+ 
+    # The final element in the last row contains the Levenshtein distance
+    return curr_row[n]
 
 def removePunctuation(text: str, punctuation: str = string.punctuation) -> str:
     translation_table = str.maketrans('', '', punctuation)
@@ -44,32 +78,29 @@ def parseSpecialKey(key: str) -> dict[str, str]:
 
     if key[0] != '%' or key[-1] != '%': return None
 
-    actualKey = key[1:-1]
+    actual_key = key[1:-1]
     type = ""
     prefix = ""
 
     for index, value in SPECIAL_KEYS.items():        
         if isinstance(value, dict):
             for prefix_index, prefix in value["prefixes"].items():
-                match = re.search(fr"{prefix}{value["key"]}", actualKey)
+                match = re.search(fr"{prefix}{value["key"]}", actual_key)
 
                 if match is None: continue
 
                 type = index
                 prefix = prefix_index
-                
-                # Remove the exact text that was matched, rather than trying to reconstruct the pattern
-                matched_text = match.group(0)
-                actualKey = actualKey.replace(matched_text, "")
+                actual_key = actual_key.replace(match.group(0), "")
                 break
 
             if len(type) > 0: break
-        elif re.search(fr"{key}", actualKey) is not None:
+        elif re.search(fr"{key}", actual_key) is not None:
             type = index
-            actualKey = re.sub(key, "", actualKey)
+            actual_key = re.sub(key, "", actual_key)
             break
 
-    return { "key": actualKey, "raw": key, "type": type, "prefix": prefix }
+    return { "key": actual_key, "raw": key, "type": type, "prefix": prefix }
 
 # Replaces all the special tokens in the response with the values from the context
 def parseResponse(response):
@@ -105,6 +136,8 @@ def parseResponse(response):
     return response
 
 def processUserMessage(message: str) -> str:
+    message_unnormalized = message
+    message_unnormalized_words = message_unnormalized.split()
     message = normalize(message)
     message_words = message.split()
 
@@ -148,7 +181,36 @@ def processUserMessage(message: str) -> str:
                 if word in sample_words:
                     sample_input_score += WEIGHT_WORD_PARTIAL
 
-        special_tokens = {}
+            # Match phrases
+            current_phrase = ""
+            current_phrase_indexes = []
+
+            for index, word in enumerate(message_words):
+                potential_phrase = f"{current_phrase} {word}".strip()
+
+                # If the phrase is less than one word, skip it
+                if len(potential_phrase) <= 1: continue
+
+                phrase_score = WEIGHT_PHRASE_EXACT
+                
+                if potential_phrase in sample_input:
+                    phrase_score += WEIGHT_PHRASE_PARTIAL
+
+                # Check all the words in the phrase to see if they are the same in the exact same spot in the sample input. If they arent remove the phrase exact score
+                for index, word in enumerate(current_phrase_indexes):
+                    if word != sample_words[index]:
+                        phrase_score -= WEIGHT_PHRASE_EXACT
+                        break
+                
+                if phrase_score > 0:
+                    current_phrase = potential_phrase
+                    current_phrase_indexes.append(index)
+                else:
+                    # If the phrase didnt match reset it
+                    current_phrase = ""
+                    current_phrase_indexes = []
+
+        special_tokens = []
 
         # Find all the special tokens are in the sample
         for index, token in enumerate(sample_input_no_punctuation.split()):
@@ -156,71 +218,92 @@ def processUserMessage(message: str) -> str:
 
             if key is None: continue
 
-            special_tokens[index] = key
+            special_tokens.append(key)
 
         # Only create a context if there are special tokens
         if len(special_tokens) > 0:
-            context = CONTEXT.copy()
+            context = copy.deepcopy(CONTEXT)
 
             # Loop through all special tokens and check if they are in the input
-            for special_index, key in special_tokens.items():
-                value = None
+            for key in special_tokens:
+                value = []
+                starting_index = 0
 
-                if special_index < len(message_words) and message_words[special_index] not in sample_input:
-                    value = message_words[special_index]
-                else:
-                    # Look for any words not in the sample input, this could be a phrase or a word
-                    # 1. First try to find words close to the expected special token position
-                    nearby_range = 2  # Look 2 words before and after the expected position
-                    candidate_words = []
+                for index, word in enumerate(message_unnormalized_words):
+                    word = normalize(word)
 
-                    # Try positions near the expected special token position first
-                    start_pos = max(0, special_index - nearby_range)
-                    end_pos = min(len(message_words), special_index + nearby_range + 1)
-
-                    for index in range(start_pos, end_pos):
-                        if index < len(message_words) and message_words[index] not in sample_input:
-                            candidate_words.append((message_words[index], abs(index - special_index)))
-
-                    # Then look through all words if we haven't found candidates
-                    if not candidate_words:
-                        for index, word in enumerate(message_words):
-                            if word in sample_input: continue
-
-                            candidate_words.append((word, abs(index - special_index)))
-                                
-                    # Pick the word closest to the expected position, or the first one if none found
-                    if candidate_words:
-                        # Sort by distance from expected position
-                        candidate_words.sort(key=lambda x: x[1])
-                        value = candidate_words[0][0]
+                    if index >= len(sample_words):
+                        ratio = 0
                     else:
-                        for index, word in enumerate(message_words):
-                            if message.count(word) <= sample_input.count(word): continue
+                        ratio = levenshtein_distance(word, sample_words[index]) / max(len(word), len(sample_words[index]))
 
-                            value = word
-                            break
+                    if word in sample_input or ratio > 0.5: continue
 
-                if value is None or len(value) == 0: continue
+                    starting_index = index
+                    break
 
-                value = re.sub(r'[^a-zA-Z]+', "", value)
+                for index, word in enumerate(message_unnormalized_words):
+                    if index < starting_index: continue
+
+                    # The unnormalized word is used for the context, but the normalized word is used for the levenshtein distance and comparison to the sample input
+                    word_unnormalized = word
+                    word = normalize(word)
+
+                    if index >= len(sample_words):
+                        ratio = 0
+                    else:
+                        ratio = levenshtein_distance(word, sample_words[index]) / max(len(word), len(sample_words[index]))
+
+                    next_word = normalize(message_words[index + 1]) if index + 1 < len(message_words) else None
+
+                    if index + 1 >= len(sample_words):
+                        next_word_ratio = 0
+                    else:
+                        next_word_ratio = levenshtein_distance(next_word, sample_words[index + 1]) / max(len(next_word), len(sample_words[index + 1]))
+                    
+                    # If the word is in the sample input and the next word is in the sample input or the ratio is greater than 0.5, skip it
+                    if (word in sample_input or ratio > 0.5) and (next_word is None or next_word in sample_input or next_word_ratio > 0.5): continue
+
+                    value.append(word_unnormalized)
+
+                if len(value) == 0: continue
+
+                value = [removePunctuation(word, "!@#$^&*()+={}|\\:;\"<>.?/~`") for word in value]
 
                 if key["type"] == "list":
                     if key["key"] not in context:
                         context[key["key"]] = []
 
+                    value_corrected = []
+                    current_string = ""
+
+                    # Parse the list into separate words. Separate words are separated by commas, periods, or common list separators like "and" or "or".
+                    for index, word in enumerate(value):
+                        if word.endswith(",") or word.endswith(".") or word in LIST_SEPARATORS or index == len(value) - 1:
+                            if word not in LIST_SEPARATORS: current_string += removePunctuation(word)
+                            if len(current_string) > 0: value_corrected.append(current_string.strip())
+
+                            current_string = ""
+                        else:
+                            current_string += f"{word.strip()} "
+
                     if key["prefix"] == "add":
-                        if value in context[key["key"]]:
-                            context[key["key"]].remove(value)
-                        
-                        context[key["key"]].append(value)
+                        for word in value_corrected:
+                            if word in context[key["key"]]:
+                                context[key["key"]].remove(word)
+
+                            context[key["key"]].append(removePunctuation(word))
                     elif key["prefix"] == "remove":
-                        context[key["key"]].remove(value)
+                        for word in value_corrected:
+                            if word in context[key["key"]]:
+                                context[key["key"]].remove(word)
                     elif key["prefix"] == "set":
-                        context[key["key"]] = value.split(",")
+                        context[key["key"]] = value_corrected
                     elif key["prefix"] == "clear":
                         context[key["key"]] = []
                 elif key["type"] == "string":
+                    value = " ".join(value)
+
                     if key["prefix"] == "set":
                         context[key["key"]] = value
                     elif key["prefix"] == "get":
@@ -268,4 +351,5 @@ def processUserMessage(message: str) -> str:
 
 while True:
     userMessage = input(f'{CONTEXT.get("user_name", "You")}: ')
-    print(f"{CONTEXT.get("bot_name", "Bot")}: {processUserMessage(userMessage)}")
+    response = processUserMessage(userMessage)
+    print(f"{CONTEXT.get("bot_name", "Bot")}: {response}")
