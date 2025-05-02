@@ -111,9 +111,9 @@ def parseResponse(response):
 
         value = CONTEXT.get(key["key"], None)
 
-        if value is None: continue
-
-        if key["type"] == "list":
+        if value is None:
+            value = "nothing"
+        elif key["type"] == "list":
             if key["prefix"] == "get":
                 if len(value) > 1:
                     value = ", ".join(value[:-1]) + " and " + value[-1]
@@ -148,14 +148,26 @@ def processUserMessage(message: str) -> str:
     for sample_index, sample in enumerate(SAMPLES):
         sample_input_no_punctuation = removePunctuation(sample["input"], SPECIAL_KEY_SAFE_PUNCTUATION)
         sample_input = normalize(re.sub(r'%[-_a-zA-Z]+%', '', sample["input"]))
-        sample_words = sample_input.split()
+        sample_words_raw = sample_input.split()
+        sample_words = []
+        sample_characters = []
+
+        for character in sample_input:
+            if character in sample_characters: continue
+
+            sample_characters.append(character)
+
+        for word in sample_input.split():
+            if word in sample_words: continue
+
+            sample_words.append(word)
 
         sample_input_score = 0
         sample_input_max_score = (
-            len(sample_words) * WEIGHT_WORD_EXACT +
+            len(sample_words_raw) * WEIGHT_WORD_EXACT +
             len(sample_words) * WEIGHT_WORD_PARTIAL +
             len(sample_input) * WEIGHT_CHARACTER_EXACT +
-            len(sample_input) * WEIGHT_CHARACTER_PARTIAL
+            len(sample_characters) * WEIGHT_CHARACTER_PARTIAL
         )
 
         if message == sample_input:
@@ -164,22 +176,26 @@ def processUserMessage(message: str) -> str:
             # Match each character
             for index, character in enumerate(sample_input):
                 if index >= len(message): break
+                if character != message[index]: continue
+                
+                sample_input_score += WEIGHT_CHARACTER_EXACT
 
-                if character == message[index]:
-                    sample_input_score += WEIGHT_CHARACTER_EXACT
-
-                if character in message:
-                    sample_input_score += WEIGHT_CHARACTER_PARTIAL
+            for character in sample_characters:
+                if character not in message: continue
+                
+                sample_input_score += WEIGHT_CHARACTER_PARTIAL
 
             # Match each word
-            for index, word in enumerate(sample_words):
-                if index >= len(sample_words): break
+            for index, word in enumerate(sample_words_raw):
+                if index >= len(message_words): break
+                if word != message_words[index]: continue
+                
+                sample_input_score += WEIGHT_WORD_EXACT
 
-                if word == sample_words[index]:
-                    sample_input_score += WEIGHT_WORD_EXACT
-
-                if word in sample_words:
-                    sample_input_score += WEIGHT_WORD_PARTIAL
+            for word in sample_words:
+                if word not in message_words: continue
+                
+                sample_input_score += WEIGHT_WORD_PARTIAL
 
             # Match phrases
             current_phrase = ""
@@ -232,10 +248,10 @@ def processUserMessage(message: str) -> str:
                 for index, word in enumerate(message_unnormalized_words):
                     word = normalize(word)
 
-                    if index >= len(sample_words):
+                    if index >= len(sample_words_raw):
                         ratio = 0
                     else:
-                        ratio = levenshtein_distance(word, sample_words[index]) / max(len(word), len(sample_words[index]))
+                        ratio = levenshtein_distance(word, sample_words_raw[index]) / max(len(word), len(sample_words_raw[index]))
 
                     if word in sample_input or ratio > 0.5: continue
 
@@ -249,17 +265,17 @@ def processUserMessage(message: str) -> str:
                     word_unnormalized = word
                     word = normalize(word)
 
-                    if index >= len(sample_words):
+                    if index >= len(sample_words_raw):
                         ratio = 0
                     else:
-                        ratio = levenshtein_distance(word, sample_words[index]) / max(len(word), len(sample_words[index]))
+                        ratio = levenshtein_distance(word, sample_words_raw[index]) / max(len(word), len(sample_words_raw[index]))
 
-                    next_word = normalize(message_words[index + 1]) if index + 1 < len(message_words) else None
-
-                    if index + 1 >= len(sample_words):
+                    if index + 1 >= len(sample_words_raw) or index + 1 >= len(message_words):
+                        next_word = None
                         next_word_ratio = 0
                     else:
-                        next_word_ratio = levenshtein_distance(next_word, sample_words[index + 1]) / max(len(next_word), len(sample_words[index + 1]))
+                        next_word = normalize(message_words[index + 1]) if index + 1 < len(message_words) else None
+                        next_word_ratio = levenshtein_distance(next_word, sample_words_raw[index + 1]) / max(len(next_word), len(sample_words_raw[index + 1]))
                     
                     # If the word is in the sample input and the next word is in the sample input or the ratio is greater than 0.5, skip it
                     if (word in sample_input or ratio > 0.5) and (next_word is None or next_word in sample_input or next_word_ratio > 0.5): continue
