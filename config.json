@@ -20,13 +20,13 @@
     }
   },
   "weights": {
-    "phrase_exact": 2,
-    "phrase_partial": 1.5,
-    "word_exact": 1,
-    "word_partial": 0.75,
-    "character_exact": 0.5,
-    "character_partial": 0.25
+    "phrase_exact": 0.8,
+    "phrase_partial": 0.5,
+    "word_exact": 0.2,
+    "word_partial": 0.6,
+    "character_exact": 0.05,
+    "character_partial": 0.2
   },
   "could_not_understand": ["Sorry, I didnt understand that."],
-  "minimum_confidence": 0.5
+  "minimum_confidence": 0.6
 }
