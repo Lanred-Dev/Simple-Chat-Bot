@@ -18,5 +18,9 @@
     {
         "input": "I like %ADD-LIST_likes%.",
         "response": "You like %INDEX-[-1]-LIST_likes%!"
+    },
+    {
+        "input": "Your name is %SET-STRING_bot_name%.",
+        "response": "My new name is %GET-STRING_bot_name%!"
     }
 ]
